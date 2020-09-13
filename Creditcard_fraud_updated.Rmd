@@ -1,0 +1,188 @@
+---
+title: "Credit card fraud detection using CART algorithm"
+author: "msalauddin"
+date: "September 12, 2020"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Content
+The datasets contains transactions made by credit cards in September 2013 by european cardholders.
+This dataset presents transactions that occurred in two days, where we have 492 frauds out of 284,807 transactions. The dataset is highly unbalanced, the positive class (frauds) account for 0.172% of all transactions.
+
+It contains only numerical input variables which are the result of a PCA transformation. Unfortunately, due to confidentiality issues, we cannot provide the original features and more background information about the data. Features V1, V2, . V28 are the principal components obtained with PCA, the only features which have not been transformed with PCA are 'Time' and 'Amount'. Feature 'Time' contains the seconds elapsed between each transaction and the first transaction in the dataset. The feature 'Amount' is the transaction Amount, this feature can be used for example-dependant cost-senstive learning. Feature 'Class' is the response variable and it takes value 1 in case of fraud and 0 otherwise.
+
+The dataset has been collected and analysed during a research collaboration of Worldline and the Machine Learning Group (http://mlg.ulb.ac.be) of ULB (Universit? Libre de Bruxelles) on big data mining and fraud detection.
+
+## Goal
+The Goal of the project is to train a model to classify transactions as Fraudulent and Non-Fraudulent using the CART Algorithm
+
+## Installing Libraries required for analysis
+
+```{r}
+#install.packages("tidyverse")
+#library(tidyverse)
+#install.packages("ggplot2")
+#library(ggplot2)
+#library(corrplot)
+#install.packages("ROSE")
+#library(ROSE)
+#install.packages("knitr")
+#library(knitr)
+#install.packages("rpart.plot")
+#library(rpart)
+#library(rpart.plot)
+#install.packages("caret")
+#library(caret)
+#install.packages("e1071")
+#library(e1071)
+```
+
+## Pre-processig and setting working directory
+
+```{r}
+setwd("D:/USF/Assignments/Credit Card Fraud Detection")
+df =read.csv("creditcard.csv")
+head(df)
+
+```
+Exploring the data for initial analysis
+
+```{r}
+colSums(is.na(df))
+
+
+
+```
+There are no missing values in our dataset.
+
+```{r}
+df$Class = factor(df$Class)
+table(df$Class)
+prop.table(table(df$Class))
+
+```
+Here Class is my dependent variable, and I am converting it to a factor.
+Also, the fraud transactions have a low occurence (492) as compared to non-fraud transactions (284315).
+This means that the dataset is skewed. Skewed data will affect the accuracy of my classification model. The model might overfit to the class that is represneted more in the dataset. An appropriate measure of model performance here would be AUC
+
+This problem can be overcome by a method called re-sampling.
+
+
+## Distribution of Class by time
+
+```{r}
+df %>%
+  ggplot(aes(x = Time, fill = factor(Class))) + geom_histogram(bins = 100)+
+  labs(x = 'Time in seconds since first transaction', y = 'No. of transactions') +
+  ggtitle('Distribution of time of transaction by class') +
+  facet_grid(Class ~ ., scales = 'free_y') + common_theme
+
+```
+
+The 'Time' feature looks similar across both classes of transactions. From the plot it is visible that Fraudulent transactions are uniformly distributed.
+
+
+##  Distribution of variable 'Amount' by class
+
+```{r}
+ggplot(df, aes(x = factor(Class), y = Amount)) + geom_boxplot() + 
+  labs(x = 'Class', y = 'Amount') +
+  ggtitle("Distribution of transaction amount by class") + common_theme
+```
+The above plot shows the distribution of Fraud and Non-Fraud transaction with Amount. From the plot its is evident that there is a lot of variability in the transaction values for non-fraud class.
+
+
+##  Visualizing Fraud by Amount and Time
+
+```{r}
+ggplot(df, aes(x = Time, y = Amount, shape = Class, color = Class)) +
+  geom_point() +
+  ylim(0,5000)+
+  ggtitle("Fraud by Amount and Time")
+
+
+```
+## Plotting Correlation between all the variables in the dataset
+
+```{r}
+cor = round(cor(df[,1:30]),2)
+corrplot(cor,method="circle")
+```
+We can infer that there is not strong correlation between most of the variables.This is because before publishing, most of the features were presented to a Principal Component Analysis (PCA) algorithm. The features V1 to V28 are most probably the Principal Components resulted after propagating the real features through PCA. We do not know if the numbering of the features reflects the importance of the Principal Components.
+
+## Modelling Approach
+
+Since the data is imbalanced (unequal distribution of the target variable), there may be a risk of over-fitting. This problem can be overcome by sampling.
+Sampling balances the distribution using some methods to produce a balanced distribution.
+
+I am using under-sampling becuase I feel it is a better approach compared to over-sampling which will almost double the observations in the datset and will slow my model.
+
+### Under Sampling
+```{r}
+sampled_data = ovun.sample(Class ~ ., data = df, method = "under", N = 399*2)$data
+kable(table(sampled_data$Class),
+      col.names = c("Fraud", "Frequency"), align = 'l')
+```
+The new data frame "sampled_data" contains a balanced distribution of class variable with 306 records of non-fraud transactions and 492 records of fraud transactions. This is the under-sampled data frame.
+
+### Splitting into training and test dataset
+
+```{r}
+set.seed(123)
+smp_size = floor(0.7 * nrow(sampled_data))
+train_ind = sample(seq_len(nrow(sampled_data)), size = smp_size)
+train = sampled_data[train_ind, ]
+test = sampled_data[-train_ind, ]
+
+```
+
+## Training the Model using CART algorithm
+I am using training data to train the CART model
+
+```{r}
+rpart_model =  rpart(Class ~ ., data = train)
+rpart_model
+```
+The above model shows us the splits produced by the Cart Algorithm
+
+###Plotting the Splits
+
+```{r}
+rpart.plot(rpart_model)
+
+```
+
+## Prediction and Model Evaluation
+### Prediction
+```{r}
+test$fraud_prob = predict(rpart_model, test[,-31])[,2]
+test$pred = ifelse(test$fraud_prob > 0.5,1,0)
+confusionMatrix(test$Class, factor(test$pred))
+
+```
+The CART model has an accuracy of 89%. But for classifcation problem accuracy is not a proper evaluation metric, especially when dealing with skewed data. So I wll consider Sensitivity (Recall) and Precision.
+Recall is 84% and Precison which is TP/(TP+FP) is 92%.
+
+
+## ROC Curve
+
+```{r}
+pred_orig <- predict(rpart_model, newdata = test, method = "class")
+roc.curve(test$Class, pred_orig[,2], plotit = TRUE)
+
+
+
+```
+Area under the curve is another important evaluation metric for binary classifiers. Here I got AUC as 0.932 which is good.
+
+Overall, the CART model seems to be doing a great job of classification where, 
+Recall = 84%
+Precision = 92%
+AUC = 0.932
